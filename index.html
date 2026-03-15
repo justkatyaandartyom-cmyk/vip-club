@@ -2394,7 +2394,6 @@ body{height:100%;font-family:'Outfit',sans-serif;background:var(--bg);color:var(
   <button class="nb on" onclick="goScreen('home')"><div class="nb-ico">🏠</div><div class="nb-lbl">Главная</div></button>
   <button class="nb"    onclick="goScreen('games')"><div class="nb-ico">🎮</div><div class="nb-lbl">Игры</div></button>
   <button class="nb"    onclick="goScreen('econ')"><div class="nb-ico">💼</div><div class="nb-lbl">Экономика</div></button>
-  <button class="nb"    onclick="goScreen('trade')"><div class="nb-ico">📈</div><div class="nb-lbl">Биржа</div></button>
   <button class="nb"    onclick="goScreen('profile')"><div class="nb-ico">👤</div><div class="nb-lbl">Профиль</div></button>
   <button class="nb"    onclick="goScreen('shop')"><div class="nb-ico">🏪</div><div class="nb-lbl">Магазин</div><div class="nb-dot"></div></button>
   <button class="nb"    onclick="goScreen('social')"><div class="nb-ico">🌍</div><div class="nb-lbl">Социал</div></button>
@@ -6643,8 +6642,11 @@ function ecTab(id,btn){
   document.querySelectorAll('.ec-tb').forEach(b=>b.classList.remove('on'));
   document.getElementById('ecS-'+id)?.classList.add('on');
   btn?.classList.add('on');
-  if(id==='cal')  _ecRenderCalendar();
-  if(id==='trade') initTrade();
+  // Скроллим обёртку наверх при переходе на биржу
+  const wrap=document.querySelector('.ec-wrap');
+  if(wrap&&id==='trade') wrap.scrollTop=0;
+  if(id==='cal')   _ecRenderCalendar();
+  if(id==='trade') setTimeout(()=>{if(typeof initTrade==='function')initTrade();},60);
 }
 
 // ─── Патч goScreen ───
@@ -7572,7 +7574,7 @@ window.goScreen=function(n){
   if(n==='shop')   setTimeout(initShop,60);
   if(n==='social') setTimeout(initSocial,60);
   if(n==='trade')  setTimeout(initTrade,60);
-  if(n==='profile') setTimeout(()=>_pfRenderPrayer(),80);
+  if(n==='profile') setTimeout(()=>{if(typeof _pfRenderPrayer==='function')_pfRenderPrayer();},80);
 };
 
 // ═══════════════════════════════════════
@@ -7674,112 +7676,6 @@ function _calcRSI(candles, period=14){
     result.push(avgL===0?100:Math.round(100-100/(1+avgG/avgL)));
   }
   return result;
-}
-
-async function initTrade(){
-  if(_tradeInited){_tradeRender();return;}
-  _tradeInited=true;
-  _tradeInitPrices();
-  if(MOCK.trading_portfolio){
-    try{_tradePortfolio=typeof MOCK.trading_portfolio==='string'?JSON.parse(MOCK.trading_portfolio):MOCK.trading_portfolio||{};}
-    catch(e){_tradePortfolio={};}
-  }
-  const d=await reqBot('get_trade');
-  if(d.ok){
-    if(d.prices) Object.assign(_tradePrices,d.prices);
-    if(d.news) _tradeNews=d.news;
-    if(d.portfolio) _tradePortfolio=d.portfolio;
-  }
-  _tradeRender();
-}
-
-function _tradeRender(){
-  _tradeRenderPortfolio();
-  _tradeRenderNews();
-  _tradeRenderAssets();
-}
-
-function _tradeRenderPortfolio(){
-  const el=document.getElementById('trPortfolio');
-  const valEl=document.getElementById('trPortfolioVal');
-  if(!el) return;
-  const entries=Object.entries(_tradePortfolio||{}).filter(([,v])=>v&&v.qty>0);
-  if(!entries.length){
-    el.innerHTML='<span style="color:var(--tx3);font-size:11px">Портфель пуст — купи первый актив!</span>';
-    if(valEl) valEl.textContent='0 🪙';
-    return;
-  }
-  let totalVal=0;
-  el.innerHTML=entries.map(([t,p])=>{
-    const cur=_tradePrices[t]||p.avg_price;
-    const nm=TRADE_ASSETS[t]?.nm||t;
-    const val=p.qty*cur; const pnl=val-p.qty*p.avg_price;
-    const pnlPct=Math.round(pnl/Math.max(1,p.qty*p.avg_price)*100);
-    totalVal+=val;
-    const col=pnl>=0?'var(--gr)':'var(--rd)';
-    const ic=pnl>=0?'▲':'▼';
-    return '<div style="display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--b1)" onclick="openTradeTerminal(\''+t+'\')">'+
-      '<div><div style="font-size:12px;font-weight:700;color:var(--tx)">'+nm+'</div>'+
-      '<div style="font-size:10px;color:var(--tx3)">'+p.qty+' шт · ср. '+p.avg_price+' 🪙</div></div>'+
-      '<div style="text-align:right"><div style="font-size:12px;font-weight:700;color:var(--tx)">'+Math.round(val)+' 🪙</div>'+
-      '<div style="font-size:10px;font-weight:700;color:'+col+'">'+ic+' '+(pnl>=0?'+':'')+Math.round(pnl)+' ('+pnlPct+'%)</div></div></div>';
-  }).join('');
-  if(valEl) valEl.textContent=fmt(Math.round(totalVal))+' 🪙';
-}
-
-function _tradeRenderNews(){
-  const el=document.getElementById('trNews');if(!el)return;
-  const news=_tradeNews.length?_tradeNews:[
-    {ticker:'KAT',pct:15,text:'Катёна одобрила KAT — фанаты скупают'},
-    {ticker:'BKAT',pct:-20,text:'BKAT упал после твита Фуглера'},
-    {ticker:'PIZZA',pct:25,text:'Пицца-коин принят к оплате'},
-  ];
-  el.innerHTML=news.slice(0,5).map(n=>{
-    const ic=n.pct>0?'📈':'📉';
-    const col=n.pct>0?'var(--gr)':'var(--rd)';
-    return '<div style="padding:5px 0;border-bottom:1px solid var(--b1)">'+
-      ic+' <b style="color:'+col+'">'+n.ticker+'</b>: '+n.text+
-      ' <span style="font-weight:700;color:'+col+'">'+(n.pct>0?'+':'')+n.pct+'%</span></div>';
-  }).join('');
-}
-
-function _tradeRenderAssets(){
-  const el=document.getElementById('trAssets');if(!el)return;
-  el.innerHTML=Object.entries(TRADE_ASSETS).map(([t,a])=>{
-    const cur=_tradePrices[t]||a.start;
-    const candles=_tradeGetCandles(t,'1h');
-    const prev=candles.length>1?candles[candles.length-2].c:cur;
-    const chg=cur-prev; const chgPct=Math.round(chg/Math.max(1,prev)*100);
-    const col=chg>=0?'var(--gr)':'var(--rd)'; const ic=chg>=0?'▲':'▼';
-    const held=(_tradePortfolio[t]?.qty)||0;
-    // SVG мини-свечи (последние 20)
-    const c20=candles.slice(-20);
-    const mn=Math.min(...c20.map(c=>c.l)); const mx=Math.max(...c20.map(c=>c.h));
-    const rng=Math.max(1,mx-mn);
-    const W=80,H=28,bw=Math.floor(W/c20.length)-1;
-    const svgBars=c20.map((c,i)=>{
-      const x=i*(bw+1);
-      const isUp=c.c>=c.o;
-      const fillCol=isUp?'#3fb950':'#f85149';
-      const bodyT=Math.round((mx-Math.max(c.o,c.c))/rng*(H-4)+2);
-      const bodyH=Math.max(1,Math.round(Math.abs(c.c-c.o)/rng*(H-4)));
-      const wickT=Math.round((mx-c.h)/rng*(H-4)+2);
-      const wickB=Math.round((mx-c.l)/rng*(H-4)+2);
-      const cx=x+Math.floor(bw/2);
-      return'<line x1="'+cx+'" y1="'+wickT+'" x2="'+cx+'" y2="'+wickB+'" stroke="'+fillCol+'" stroke-width="0.8"/>'+
-             '<rect x="'+x+'" y="'+bodyT+'" width="'+bw+'" height="'+bodyH+'" fill="'+fillCol+'"/>';
-    }).join('');
-    return '<div style="background:var(--card);border:1.5px solid var(--b1);border-radius:14px;padding:11px 13px;margin-bottom:8px;display:flex;align-items:center;gap:10px;cursor:pointer;" onclick="openTradeTerminal(\''+t+'\')">'+
-      '<div style="flex:1;min-width:0">'+
-        '<div style="font-size:13px;font-weight:700;color:var(--tx)">'+a.nm+'</div>'+
-        '<div style="font-size:10px;color:var(--tx3)">'+t+(held?' · '+held+' шт':'')+'</div>'+
-      '</div>'+
-      '<svg width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'" style="flex-shrink:0">'+svgBars+'</svg>'+
-      '<div style="text-align:right;flex-shrink:0;min-width:64px">'+
-        '<div style="font-size:14px;font-weight:900;color:var(--tx);font-family:\'Nunito\',sans-serif">'+cur+' 🪙</div>'+
-        '<div style="font-size:10px;font-weight:700;color:'+col+'">'+ic+' '+(chg>=0?'+':'')+chg+' ('+chgPct+'%)</div>'+
-      '</div></div>';
-  }).join('');
 }
 
 function trLoadNews(){
@@ -7986,17 +7882,16 @@ function _ttDraw(){
     candles.forEach((c,i)=>{
       const x=toX(i);
       const isUp=c.c>=c.o;
-      ctx.strokeStyle=isUp?upColor:dnColor;
-      ctx.fillStyle=isUp?upColor:dnColor;
       ctx.lineWidth=1;
-      // Тень
+      // Тень (фитиль)
+      ctx.strokeStyle=isUp?upColor:dnColor;
       ctx.beginPath();ctx.moveTo(x,toY(c.h));ctx.lineTo(x,toY(c.l));ctx.stroke();
-      // Тело
+      // Тело — заполненное для обоих направлений (как TradingView)
       const bodyTop=Math.min(toY(c.o),toY(c.c));
       const bodyH=Math.max(1,Math.abs(toY(c.o)-toY(c.c)));
       const bx=x-Math.floor(bw/2);
-      if(isUp){ctx.strokeRect(bx,bodyTop,bw,bodyH);}
-      else{ctx.fillRect(bx,bodyTop,bw,bodyH);}
+      ctx.fillStyle=isUp?upColor:dnColor;
+      ctx.fillRect(bx,bodyTop,bw,bodyH);
     });
   } else if(_tradeCurrentChart==='line'){
     ctx.strokeStyle=color;ctx.lineWidth=2;ctx.lineJoin='round';
@@ -8178,6 +8073,136 @@ async function doTrade(ticker,dir){
 }
 
 // ── Мок reqBot для тестирования ──
+async function initTrade(){
+  if(_tradeInited){_tradeRender();return;}
+  _tradeInited=true;
+  _tradeInitPrices();
+  if(MOCK.trading_portfolio){
+    try{_tradePortfolio=typeof MOCK.trading_portfolio==='string'?JSON.parse(MOCK.trading_portfolio):MOCK.trading_portfolio||{};}
+    catch(e){_tradePortfolio={};}
+  }
+  const d=await reqBot('get_trade');
+  if(d.ok){
+    if(d.prices) Object.assign(_tradePrices,d.prices);
+    if(d.news) _tradeNews=d.news;
+    if(d.portfolio) _tradePortfolio=d.portfolio;
+  }
+  _tradeRender();
+}
+function _tradeRender(){_tradeRenderPortfolio();_tradeRenderNews();_tradeRenderAssets();}
+function _tradeRenderPortfolio(){
+  const el=document.getElementById('trPortfolio');
+  const valEl=document.getElementById('trPortfolioVal');
+  if(!el) return;
+  const entries=Object.entries(_tradePortfolio||{}).filter(([,v])=>v&&v.qty>0);
+  if(!entries.length){el.innerHTML='<span style="color:var(--tx3);font-size:11px">Портфель пуст — купи первый актив!</span>';if(valEl)valEl.textContent='0 🪙';return;}
+  let totalVal=0;
+  el.innerHTML=entries.map(([t,p])=>{
+    const cur=_tradePrices[t]||p.avg_price;
+    const val=p.qty*cur; const pnl=val-p.qty*p.avg_price;
+    const pnlPct=Math.round(pnl/Math.max(1,p.qty*p.avg_price)*100);
+    totalVal+=val;
+    const col=pnl>=0?'var(--gr)':'var(--rd)'; const ic=pnl>=0?'▲':'▼';
+    return '<div style="display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--b1);cursor:pointer" onclick="openTradeTerminal(\''+t+'\')">'
+      +'<div><div style="font-size:12px;font-weight:700;color:var(--tx)">'+(TRADE_ASSETS[t]?.nm||t)+'</div>'
+      +'<div style="font-size:10px;color:var(--tx3)">'+p.qty+' шт · ср. '+p.avg_price+' 🪙</div></div>'
+      +'<div style="text-align:right"><div style="font-size:12px;font-weight:700;color:var(--tx)">'+Math.round(val)+' 🪙</div>'
+      +'<div style="font-size:10px;font-weight:700;color:'+col+'">'+ic+' '+(pnl>=0?'+':'')+Math.round(pnl)+' ('+pnlPct+'%)</div></div></div>';
+  }).join('');
+  if(valEl) valEl.textContent=fmt(Math.round(totalVal))+' 🪙';
+}
+function _tradeRenderNews(){
+  const el=document.getElementById('trNews');if(!el)return;
+  const news=_tradeNews.length?_tradeNews:[
+    {ticker:'KAT',pct:15,text:'Катёна одобрила KAT — фанаты скупают'},
+    {ticker:'BKAT',pct:-20,text:'BKAT упал после твита Фуглера'},
+    {ticker:'PIZZA',pct:25,text:'Пицца-коин принят к оплате'},
+  ];
+  el.innerHTML=news.slice(0,5).map(n=>{
+    const ic=n.pct>0?'📈':'📉'; const col=n.pct>0?'var(--gr)':'var(--rd)';
+    return '<div style="padding:5px 0;border-bottom:1px solid var(--b1);font-size:12px;">'+ic+' <b style="color:'+col+'">'+n.ticker+'</b>: '+n.text+' <span style="font-weight:700;color:'+col+'">'+(n.pct>0?'+':'')+n.pct+'%</span></div>';
+  }).join('');
+}
+function _tradeRenderAssets(){
+  const el=document.getElementById('trAssets');if(!el)return;
+  el.innerHTML=Object.entries(TRADE_ASSETS).map(([t,a])=>{
+    const cur=_tradePrices[t]||a.start;
+    const candles=_tradeGetCandles(t,'1h');
+    const prev=candles.length>1?candles[candles.length-2].c:cur;
+    const chg=cur-prev; const chgPct=Math.round(chg/Math.max(1,prev)*100);
+    const col=chg>=0?'var(--gr)':'var(--rd)'; const ic=chg>=0?'▲':'▼';
+    const held=(_tradePortfolio[t]?.qty)||0;
+    const c20=candles.slice(-20);
+    const mn=Math.min(...c20.map(c=>c.l)),mx=Math.max(...c20.map(c=>c.h));
+    const rng=Math.max(1,mx-mn); const W=80,H=28,bw=Math.max(2,Math.floor(W/c20.length)-1);
+    const svgBars=c20.map((c,i)=>{
+      const x=i*(bw+1); const isUp=c.c>=c.o; const fc=isUp?'#3fb950':'#f85149';
+      const bT=Math.round((mx-Math.max(c.o,c.c))/rng*(H-4)+2);
+      const bH=Math.max(1,Math.round(Math.abs(c.c-c.o)/rng*(H-4)));
+      const cx=x+Math.floor(bw/2);
+      const wT=Math.round((mx-c.h)/rng*(H-4)+2); const wB=Math.round((mx-c.l)/rng*(H-4)+2);
+      return '<line x1="'+cx+'" y1="'+wT+'" x2="'+cx+'" y2="'+wB+'" stroke="'+fc+'" stroke-width="0.8"/>'
+            +'<rect x="'+x+'" y="'+bT+'" width="'+bw+'" height="'+bH+'" fill="'+fc+'"/>';
+    }).join('');
+    return '<div style="background:var(--card);border:1.5px solid var(--b1);border-radius:14px;padding:11px 13px;margin-bottom:8px;display:flex;align-items:center;gap:10px;cursor:pointer;" onclick="openTradeTerminal(\''+t+'\')">'
+      +'<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:700;color:var(--tx)">'+a.nm+'</div>'
+      +'<div style="font-size:10px;color:var(--tx3)">'+t+(held?' · '+held+' шт':' · нажми для торговли')+'</div></div>'
+      +'<svg width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'" style="flex-shrink:0">'+svgBars+'</svg>'
+      +'<div style="text-align:right;flex-shrink:0;min-width:64px">'
+      +'<div style="font-size:14px;font-weight:900;color:var(--tx);font-family:\'Nunito\',sans-serif">'+cur+' 🪙</div>'
+      +'<div style="font-size:10px;font-weight:700;color:'+col+'">'+ic+' '+(chg>=0?'+':'')+chg+' ('+chgPct+'%)</div></div></div>';
+  }).join('');
+}
+function trLoadNews(){
+  reqBot('get_trade').then(d=>{
+    if(d.ok){
+      if(d.prices){Object.assign(_tradePrices,d.prices);_tradeCandles={};}
+      if(d.news) _tradeNews=d.news;
+      if(d.portfolio){_tradePortfolio=d.portfolio;MOCK.trading_portfolio=d.portfolio;}
+    }
+    _tradeRender(); toast('📊 Рынок обновлён!');
+  });
+}
+
+// ═══ МОЛИТВА ═══
+const PRAYER_CD=3600;
+let _prayerCdTimer=null;
+function _pfRenderPrayer(){
+  const cnt=MOCK.prayer_count||0,last=MOCK.last_prayer||0,now=Math.floor(Date.now()/1000),rem=Math.max(0,PRAYER_CD-(now-last));
+  const cntEl=document.getElementById('prayerCounter'),barEl=document.getElementById('prayerBar'),cdEl=document.getElementById('prayerCd'),btn=document.getElementById('prayerBtn'),msg=document.getElementById('prayerMsg');
+  if(!cntEl)return;
+  cntEl.textContent=cnt+' / 35';
+  if(barEl) barEl.style.width=Math.min(100,Math.round(cnt/35*100))+'%';
+  if(cnt>=35){if(btn){btn.textContent='🎉 Ачивка получена!';btn.disabled=true;btn.style.opacity='.6';}if(msg)msg.textContent='Ты получила ачивку 🐰 Заяц!';return;}
+  if(rem>0){
+    if(btn){btn.disabled=true;btn.style.opacity='.5';}
+    if(cdEl) cdEl.textContent='⏳ Следующая молитва через '+fmtT(rem);
+    if(_prayerCdTimer)clearInterval(_prayerCdTimer);
+    _prayerCdTimer=setInterval(()=>{
+      const r=Math.max(0,PRAYER_CD-(Math.floor(Date.now()/1000)-(MOCK.last_prayer||0)));
+      if(cdEl)cdEl.textContent=r>0?'⏳ через '+fmtT(r):'✅ Можно молиться!';
+      if(r===0){clearInterval(_prayerCdTimer);if(btn){btn.disabled=false;btn.style.opacity='';}}
+    },1000);
+  } else {
+    if(btn){btn.disabled=false;btn.style.opacity='';}
+    if(cdEl) cdEl.textContent='✅ Можно молиться прямо сейчас!';
+  }
+}
+async function doPrayer(){
+  const btn=document.getElementById('prayerBtn'),msg=document.getElementById('prayerMsg');
+  if(btn)btn.disabled=true;
+  const d=await reqBot('do_prayer');
+  if(!d.ok){const rem=d.remaining||0;if(msg)msg.textContent='⏳ Подожди ещё '+fmtT(rem);if(btn)btn.disabled=false;return;}
+  MOCK.prayer_count=(MOCK.prayer_count||0)+1;MOCK.last_prayer=Math.floor(Date.now()/1000);
+  const cnt=MOCK.prayer_count;
+  const prayers=['Катёна услышала тебя... 🙏','Молитва принята! 🌟','Катёна кивнула головой 👑','Священный ритуал совершён ✨','Катёна-кот промурчал что-то доброе 🐱'];
+  if(msg)msg.textContent=prayers[cnt%prayers.length];
+  if(navigator.vibrate)navigator.vibrate([40,20,60]);
+  toast('🙏 Молитва '+cnt+'/35 отправлена!');
+  if(cnt>=35){toast('🎉 Ачивка Заяц получена!');if(!PF.done.includes('Заяц'))PF.done.push('Заяц');}
+  questTrack('pray',1);_pfRenderPrayer();
+}
+
 const _origReqBot=reqBot;
 if(!_IS_TG){
   window.reqBot=function(action,extra={}){
@@ -8199,347 +8224,6 @@ if(!_IS_TG){
     }
     if(action==='do_prayer'){
       const now=Math.floor(Date.now()/1000);const last=MOCK.last_prayer||0;const rem=Math.max(0,PRAYER_CD-(now-last));
-      if(rem>0) return Promise.resolve({ok:false,error:'cooldown',remaining:rem});
-      return Promise.resolve({ok:true,count:(MOCK.prayer_count||0)+1});
-    }
-    return _origReqBot(action,extra);
-  };
-}
-</script>
-</body>
-</html>
-  KAT:  {nm:'🐱 Акции Катёны',  start:100, vol:0.05},
-  FUG:  {nm:'💀 Монеты Фуглера', start:50,  vol:0.08},
-  KOLA: {nm:'🥤 Кока-Кола',     start:75,  vol:0.05},
-  TROLL:{nm:'😂 Троллфейс',     start:200, vol:0.10},
-  VIP:  {nm:'🔥 Огненный VIP',  start:150, vol:0.07},
-  STAR: {nm:'⭐ Звезда Телеги', start:120, vol:0.07},
-  PIZZA:{nm:'🍕 Пицца-коин',    start:40,  vol:0.12},
-  CROWN:{nm:'👑 Корона',         start:300, vol:0.05},
-  BKAT: {nm:'🌊 Биткатёна',     start:500, vol:0.15},
-};
-
-// Локальные цены (синхронизируются с ботом при открытии)
-let _tradePrices={};
-let _tradeHistory={};
-let _tradeInited=false;
-let _tradePortfolio={};     // { KAT:{qty,avg_price}, ... }
-let _tradeNews=[];
-
-function _tradeInitPrices(){
-  if(Object.keys(_tradePrices).length) return;
-  for(const [t,a] of Object.entries(TRADE_ASSETS)){
-    let p=a.start, hist=[];
-    for(let i=0;i<6;i++){p=Math.max(10,Math.round(p*(1+(Math.random()-0.5)*a.vol*0.6)));hist.push(p);}
-    _tradePrices[t]=hist[hist.length-1];
-    _tradeHistory[t]=hist;
-  }
-}
-
-async function initTrade(){
-  if(_tradeInited) return;
-  _tradeInited=true;
-  _tradeInitPrices();
-  // Загружаем портфель из MOCK (данные из БД)
-  if(MOCK.trading_portfolio){
-    try{_tradePortfolio=typeof MOCK.trading_portfolio==='string'?JSON.parse(MOCK.trading_portfolio):MOCK.trading_portfolio;}
-    catch(e){_tradePortfolio={};}
-  }
-  // Загружаем цены с бота
-  const d=await reqBot('get_trade');
-  if(d.ok){
-    if(d.prices) Object.assign(_tradePrices,d.prices);
-    if(d.history) Object.assign(_tradeHistory,d.history);
-    if(d.news) _tradeNews=d.news;
-    if(d.portfolio) _tradePortfolio=d.portfolio;
-  }
-  _tradeRender();
-}
-
-function _tradeRender(){
-  _tradeRenderPortfolio();
-  _tradeRenderNews();
-  _tradeRenderAssets();
-}
-
-function _tradeRenderPortfolio(){
-  const el=document.getElementById('trPortfolio');
-  const valEl=document.getElementById('trPortfolioVal');
-  if(!el) return;
-  const entries=Object.entries(_tradePortfolio||{}).filter(([,v])=>v&&v.qty>0);
-  if(!entries.length){
-    el.innerHTML='<span style="color:var(--tx3)">Портфель пуст — купи первый актив!</span>';
-    if(valEl) valEl.textContent='0 🪙';
-    return;
-  }
-  let totalVal=0;
-  el.innerHTML=entries.map(([t,p])=>{
-    const cur=_tradePrices[t]||p.avg_price;
-    const nm=TRADE_ASSETS[t]?.nm||t;
-    const val=p.qty*cur;
-    const pnl=val-p.qty*p.avg_price;
-    const pnlPct=Math.round(pnl/Math.max(1,p.qty*p.avg_price)*100);
-    totalVal+=val;
-    const col=pnl>=0?'var(--gr)':'var(--rd)';
-    return'<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--b1)">'+
-      '<div><div style="font-size:12px;font-weight:700;color:var(--tx)">'+nm+'</div>'+
-      '<div style="font-size:10px;color:var(--tx3)">'+p.qty+' шт. · ср. '+p.avg_price+' 🪙</div></div>'+
-      '<div style="text-align:right"><div style="font-size:12px;font-weight:700;color:var(--tx)">'+Math.round(val)+' 🪙</div>'+
-      '<div style="font-size:10px;font-weight:700;color:'+col+'">'+(pnl>=0?'+':'')+Math.round(pnl)+' ('+pnlPct+'%)</div></div>'+
-    '</div>';
-  }).join('');
-  if(valEl) valEl.textContent=fmt(Math.round(totalVal))+' 🪙';
-}
-
-function _tradeRenderNews(){
-  const el=document.getElementById('trNews');
-  if(!el) return;
-  if(!_tradeNews.length){
-    // Генерируем демо-новость
-    const tickers=Object.keys(TRADE_ASSETS);
-    const t=tickers[Math.floor(Math.random()*tickers.length)];
-    const pct=Math.round((Math.random()-0.5)*30);
-    _tradeNews=[{ticker:t,pct,text:TRADE_ASSETS[t].nm+' '+(pct>0?'растёт':'падает')+' ('+pct+'%)'}];
-  }
-  el.innerHTML=_tradeNews.slice(0,5).map(n=>{
-    const ic=n.pct>0?'📈':'📉';
-    const col=n.pct>0?'var(--gr)':'var(--rd)';
-    return'<div style="padding:4px 0;border-bottom:1px solid var(--b1);font-size:12px;">'+
-      ic+' <b style="color:'+col+'">'+n.ticker+'</b>: '+n.text+
-    '</div>';
-  }).join('');
-}
-
-function _tradeRenderAssets(){
-  const el=document.getElementById('trAssets');
-  if(!el) return;
-  el.innerHTML=Object.entries(TRADE_ASSETS).map(([t,a])=>{
-    const cur=_tradePrices[t]||a.start;
-    const hist=_tradeHistory[t]||[];
-    const prev=hist.length>1?hist[hist.length-2]:cur;
-    const chg=cur-prev;
-    const chgPct=Math.round(chg/Math.max(1,prev)*100);
-    const col=chg>=0?'var(--gr)':'var(--rd)';
-    const held=(_tradePortfolio[t]?.qty)||0;
-    // Мини-график SVG
-    const pts=hist.length>1?hist.map((p,i)=>{
-      const x=Math.round(i/(hist.length-1)*60);
-      const mn=Math.min(...hist),mx=Math.max(...hist);
-      const y=Math.round(20-(p-mn)/Math.max(1,mx-mn)*18);
-      return x+','+y;
-    }).join(' '):'0,10 60,10';
-    const lineCol=chg>=0?'#3fb950':'#f85149';
-    return'<div style="background:var(--card);border:1.5px solid var(--b1);border-radius:14px;padding:12px 14px;margin-bottom:8px;display:flex;align-items:center;gap:12px;" onclick="openTradeModal(\''+t+'\')" >'+
-      '<div style="flex:1;min-width:0">'+
-        '<div style="font-size:13px;font-weight:700;color:var(--tx)">'+a.nm+'</div>'+
-        '<div style="font-size:10px;color:var(--tx3)">'+t+(held?' · '+held+' шт.':'')+'</div>'+
-      '</div>'+
-      '<svg width="62" height="22" viewBox="0 0 62 22" style="flex-shrink:0">'+
-        '<polyline points="'+pts+'" fill="none" stroke="'+lineCol+'" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>'+
-      '</svg>'+
-      '<div style="text-align:right;flex-shrink:0;min-width:60px">'+
-        '<div style="font-size:14px;font-weight:800;color:var(--tx);font-family:\'Nunito\',sans-serif">'+cur+' 🪙</div>'+
-        '<div style="font-size:10px;font-weight:700;color:'+col+'">'+(chg>=0?'+':'')+chg+' ('+chgPct+'%)</div>'+
-      '</div>'+
-    '</div>';
-  }).join('');
-}
-
-function trLoadNews(){
-  reqBot('get_trade').then(d=>{
-    if(d.ok){
-      if(d.prices) Object.assign(_tradePrices,d.prices);
-      if(d.history) Object.assign(_tradeHistory,d.history);
-      if(d.news) _tradeNews=d.news;
-      if(d.portfolio){_tradePortfolio=d.portfolio;MOCK.trading_portfolio=d.portfolio;}
-    }
-    _tradeRender();
-    toast('📊 Рынок обновлён!');
-  });
-}
-
-function openTradeModal(ticker){
-  const a=TRADE_ASSETS[ticker];if(!a)return;
-  const cur=_tradePrices[ticker]||a.start;
-  const bal=MOCK.balance||S.bal;
-  const held=(_tradePortfolio[ticker]?.qty)||0;
-  const maxBuy=Math.floor(bal/cur);
-
-  document.getElementById('tradeModalTicker')?.parentElement?.remove?.();
-  const el=document.createElement('div');
-  el.style.cssText='position:fixed;inset:0;z-index:400;background:rgba(0,0,0,.6);backdrop-filter:blur(6px);display:flex;align-items:flex-end;';
-  el.innerHTML=
-    '<div style="width:100%;background:var(--bg2);border-radius:24px 24px 0 0;padding:20px 18px 36px;border:1px solid var(--b2);border-bottom:none;">'+
-    '<div style="width:36px;height:4px;background:var(--b2);border-radius:2px;margin:0 auto 16px;"></div>'+
-    '<div id="tradeModalTicker" style="font-family:\'Nunito\',sans-serif;font-size:20px;font-weight:900;color:var(--tx);margin-bottom:4px;">'+a.nm+'</div>'+
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;">'+
-      '<div style="background:var(--card);border:1px solid var(--b1);border-radius:12px;padding:10px;"><div style="font-size:10px;color:var(--tx3)">Цена</div><div style="font-size:16px;font-weight:800;color:var(--am);">'+cur+' 🪙</div></div>'+
-      '<div style="background:var(--card);border:1px solid var(--b1);border-radius:12px;padding:10px;"><div style="font-size:10px;color:var(--tx3)">У тебя</div><div style="font-size:16px;font-weight:800;color:var(--tx);">'+held+' шт.</div></div>'+
-    '</div>'+
-    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">'+
-      '<input id="tradeQtyInp" type="number" min="1" value="1" placeholder="Кол-во" style="flex:1;background:var(--b1);border:1.5px solid var(--b2);border-radius:10px;padding:10px 12px;font-size:14px;color:var(--tx);font-family:\'Outfit\',sans-serif;outline:none;">'+
-      '<div style="font-size:11px;color:var(--tx3);flex-shrink:0">макс.<br>'+maxBuy+' шт.</div>'+
-    '</div>'+
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">'+
-      '<button onclick="doTrade(\''+ticker+'\',\'buy\')" style="padding:13px;border-radius:13px;border:none;background:var(--grs);color:var(--gr);font-size:14px;font-weight:700;cursor:pointer;font-family:\'Outfit\',sans-serif;">📈 Купить</button>'+
-      '<button onclick="doTrade(\''+ticker+'\',\'sell\')" style="padding:13px;border-radius:13px;border:none;background:rgba(248,81,73,.12);color:var(--rd);font-size:14px;font-weight:700;cursor:pointer;font-family:\'Outfit\',sans-serif;">📉 Продать</button>'+
-    '</div>'+
-    '<button onclick="this.closest(\'div[style*=fixed]\').remove()" style="width:100%;padding:12px;border-radius:13px;border:none;background:var(--b1);color:var(--tx2);font-size:13px;font-weight:700;cursor:pointer;font-family:\'Outfit\',sans-serif;">Закрыть</button>'+
-    '</div>';
-  (document.getElementById('app')||document.body).appendChild(el);
-}
-
-async function doTrade(ticker,dir){
-  const qty=parseInt(document.getElementById('tradeQtyInp')?.value)||1;
-  if(qty<1){toast('Введи количество!');return;}
-  const cur=_tradePrices[ticker]||TRADE_ASSETS[ticker]?.start||100;
-  const bal=MOCK.balance||S.bal;
-  if(dir==='buy'&&bal<cur*qty){toast('Не хватает 🪙!');return;}
-  const held=(_tradePortfolio[ticker]?.qty)||0;
-  if(dir==='sell'&&held<qty){toast('Нет столько акций!');return;}
-
-  const d=await reqBot(dir==='buy'?'trade_buy':'trade_sell',{ticker,qty,price:cur});
-  if(!d.ok){toast('Ошибка: '+(d.error||'повтори'));return;}
-
-  // Обновляем локально
-  if(dir==='buy'){
-    const prev=_tradePortfolio[ticker]||{qty:0,avg_price:cur};
-    const newQty=prev.qty+qty;
-    _tradePortfolio[ticker]={qty:newQty,avg_price:Math.round((prev.qty*prev.avg_price+qty*cur)/newQty)};
-    MOCK.balance=d.new_balance;S.bal=MOCK.balance;GBAL=S.bal;syncGBal();
-    toast('📈 Куплено '+qty+' '+ticker+' за '+fmt(cur*qty)+' 🪙!');
-  } else {
-    const prev=_tradePortfolio[ticker]||{qty:0,avg_price:cur};
-    const newQty=Math.max(0,prev.qty-qty);
-    if(newQty===0) delete _tradePortfolio[ticker];
-    else _tradePortfolio[ticker]={...prev,qty:newQty};
-    MOCK.balance=d.new_balance;S.bal=MOCK.balance;GBAL=S.bal;syncGBal();
-    toast('📉 Продано '+qty+' '+ticker+' за '+fmt(d.earned)+' 🪙!');
-    if(d.earned) questTrack('earn',d.earned);
-  }
-  MOCK.trading_portfolio=_tradePortfolio;
-  document.querySelector('div[style*="position:fixed"][style*="z-index:400"]')?.remove();
-  _tradeRender();
-}
-
-// ═══════════════════════════════════════
-// МОЛИТВА
-// ═══════════════════════════════════════
-const PRAYER_CD=3600; // 1 час
-let _prayerCdTimer=null;
-
-function _pfRenderPrayer(){
-  const cnt=MOCK.prayer_count||0;
-  const last=MOCK.last_prayer||0;
-  const now=Math.floor(Date.now()/1000);
-  const rem=Math.max(0,PRAYER_CD-(now-last));
-
-  const cntEl=document.getElementById('prayerCounter');
-  const barEl=document.getElementById('prayerBar');
-  const cdEl=document.getElementById('prayerCd');
-  const btn=document.getElementById('prayerBtn');
-  const msg=document.getElementById('prayerMsg');
-  if(!cntEl)return;
-
-  cntEl.textContent=cnt+' / 35';
-  if(barEl) barEl.style.width=Math.min(100,Math.round(cnt/35*100))+'%';
-
-  if(cnt>=35){
-    if(btn){btn.textContent='🎉 Ачивка получена!';btn.disabled=true;btn.style.opacity='.6';}
-    if(msg) msg.textContent='Ты получила ачивку 🐰 Заяц!';
-    return;
-  }
-
-  if(rem>0){
-    if(btn){btn.disabled=true;btn.style.opacity='.5';}
-    if(cdEl) cdEl.textContent='⏳ Следующая молитва через '+fmtT(rem);
-    if(_prayerCdTimer) clearInterval(_prayerCdTimer);
-    _prayerCdTimer=setInterval(()=>{
-      const r=Math.max(0,PRAYER_CD-(Math.floor(Date.now()/1000)-(MOCK.last_prayer||0)));
-      if(cdEl) cdEl.textContent=r>0?'⏳ Следующая молитва через '+fmtT(r):'✅ Можно молиться!';
-      if(r===0){
-        clearInterval(_prayerCdTimer);
-        if(btn){btn.disabled=false;btn.style.opacity='';}
-        if(msg) msg.textContent='';
-      }
-    },1000);
-  } else {
-    if(btn){btn.disabled=false;btn.style.opacity='';}
-    if(cdEl) cdEl.textContent='✅ Можно молиться прямо сейчас!';
-  }
-}
-
-async function doPrayer(){
-  const btn=document.getElementById('prayerBtn');
-  const msg=document.getElementById('prayerMsg');
-  if(btn) btn.disabled=true;
-
-  const d=await reqBot('do_prayer');
-  if(!d.ok){
-    const rem=d.remaining||0;
-    if(msg) msg.textContent='⏳ Подожди ещё '+fmtT(rem);
-    if(btn) btn.disabled=false;
-    return;
-  }
-
-  MOCK.prayer_count=(MOCK.prayer_count||0)+1;
-  MOCK.last_prayer=Math.floor(Date.now()/1000);
-
-  const cnt=MOCK.prayer_count;
-  const prayers=[
-    'Катёна услышала тебя... 🙏','Молитва принята! 🌟',
-    'Катёна кивнула головой 👑','Священный ритуал совершён ✨',
-    'Катёна-кот промурчал что-то доброе 🐱',
-  ];
-  if(msg) msg.textContent=prayers[cnt%prayers.length];
-  if(navigator.vibrate) navigator.vibrate([40,20,60]);
-  toast('🙏 Молитва '+cnt+'/35 отправлена!');
-
-  if(cnt>=35){
-    toast('🎉 Ачивка Заяц получена!');
-    if(!PF.done.includes('Заяц'))PF.done.push('Заяц');
-  }
-  questTrack('pray',1);
-  _pfRenderPrayer();
-}
-
-// ── Добавляем get_trade / trade_buy / trade_sell / do_prayer в mок reqBot ──
-const _origReqBot=reqBot;
-// Переопределяем только мок-ветку (реальная через sendData не меняется)
-if(!_IS_TG){
-  window.reqBot=function(action,extra={}){
-    if(action==='get_trade'){
-      _tradeInitPrices();
-      return Promise.resolve({
-        ok:true,
-        prices:_tradePrices,
-        history:_tradeHistory,
-        portfolio:_tradePortfolio,
-        news:_tradeNews.length?_tradeNews:[
-          {ticker:'KAT',pct:15,text:'Катёна одобрила KAT — фанаты скупают'},
-          {ticker:'BKAT',pct:-20,text:'BKAT упал после твита Фуглера'},
-          {ticker:'PIZZA',pct:25,text:'Пицца-коин принят к оплате в пиццериях'},
-        ],
-      });
-    }
-    if(action==='trade_buy'){
-      const {ticker,qty,price}=extra;
-      const cost=qty*price;
-      const bal=MOCK.balance||S.bal;
-      if(bal<cost) return Promise.resolve({ok:false,error:'not_enough'});
-      MOCK.balance=bal-cost;S.bal=MOCK.balance;GBAL=S.bal;
-      return Promise.resolve({ok:true,new_balance:MOCK.balance});
-    }
-    if(action==='trade_sell'){
-      const {ticker,qty,price}=extra;
-      const earned=qty*price;
-      MOCK.balance=(MOCK.balance||S.bal)+earned;S.bal=MOCK.balance;GBAL=S.bal;
-      return Promise.resolve({ok:true,new_balance:MOCK.balance,earned});
-    }
-    if(action==='do_prayer'){
-      const now=Math.floor(Date.now()/1000);
-      const last=MOCK.last_prayer||0;
-      const rem=Math.max(0,PRAYER_CD-(now-last));
       if(rem>0) return Promise.resolve({ok:false,error:'cooldown',remaining:rem});
       return Promise.resolve({ok:true,count:(MOCK.prayer_count||0)+1});
     }
