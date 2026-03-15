@@ -2487,36 +2487,40 @@ const PT={biz:0,prop:3*3600};
 
 // ── BOT ──
 // ── BOT API ──
-// Реальный режим: через Telegram WebApp sendData / mock для тестирования
+// Связь с ботом через Telegram Bot API (answerWebAppQuery не нужен)
+// Используем fetch к нашему API-серверу который добавим в бота
 const _IS_TG = !!(window.Telegram?.WebApp?.initData);
-let _pendingResolve = null;
+const _TG_WA = window.Telegram?.WebApp;
 
-// Слушаем ответы от бота (в реальном режиме)
-if(_IS_TG){
-  window.addEventListener('message', e=>{
+// API URL — бот поднимает HTTP сервер на том же хосте
+// Замени YOUR_SERVER_IP на IP твоего сервера или домен
+const API_URL = 'http://78.24.217.216:8080/api'; // заглушка, заменить
+// В реальности: 'http://ВАШ_IP:8080/api' или 'https://ВАШ_ДОМЕН/api'
+
+async function reqBot(action, extra={}){
+  if(_IS_TG && _TG_WA?.initData){
     try{
-      const d=JSON.parse(e.data);
-      if(d.ok!==undefined && _pendingResolve){
-        const res=_pendingResolve; _pendingResolve=null; res(d);
-      }
-    }catch(err){}
-  });
+      const resp = await fetch(API_URL, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          action,
+          init_data: _TG_WA.initData,  // Telegram проверяет подлинность
+          ...extra
+        })
+      });
+      if(!resp.ok) throw new Error('HTTP '+resp.status);
+      return await resp.json();
+    } catch(e){
+      console.warn('API error:', e);
+      // Fallback на мок если сервер недоступен
+      return _mockReqBot(action, extra);
+    }
+  }
+  return _mockReqBot(action, extra);
 }
 
-function reqBot(action, extra={}){
-  if(_IS_TG){
-    return new Promise(resolve=>{
-      _pendingResolve=resolve;
-      window.Telegram.WebApp.sendData(JSON.stringify({action,...extra}));
-      // Таймаут 8 сек — если бот не ответил, fallback
-      setTimeout(()=>{
-        if(_pendingResolve===resolve){
-          _pendingResolve=null; resolve({ok:false,error:'timeout'});
-        }
-      }, 8000);
-    });
-  }
-  // ── МОК для тестирования вне Telegram ──
+function _mockReqBot(action, extra={}){
   return new Promise(r=>setTimeout(()=>{
     if(action==='get_profile') r({...MOCK});
     else if(action==='get_top') r(MOCK_TOP);
@@ -2540,6 +2544,26 @@ function reqBot(action, extra={}){
     else if(action==='get_player_profile'){
       const p=MOCK_TOP.players.find(x=>x.user_id===extra.target_uid)||null;
       r(p?{ok:true,...p}:{ok:false,error:'not_found'});
+    }
+    else if(action==='get_trade'){
+      if(typeof _tradeInitPrices==='function') _tradeInitPrices();
+      r({ok:true,prices:_tradePrices||{},history:{},portfolio:_tradePortfolio||{},
+        news:[{ticker:'KAT',pct:15,text:'Катёна одобрила KAT'},{ticker:'BKAT',pct:-20,text:'BKAT упал'}]});
+    }
+    else if(action==='trade_buy'){
+      const cost=(extra.qty||0)*(extra.price||0);const bal=MOCK.balance||S.bal;
+      if(bal<cost) r({ok:false,error:'not_enough'});
+      else{MOCK.balance=bal-cost;S.bal=MOCK.balance;GBAL=S.bal;r({ok:true,new_balance:MOCK.balance});}
+    }
+    else if(action==='trade_sell'){
+      const earned=(extra.qty||0)*(extra.price||0);
+      MOCK.balance=(MOCK.balance||S.bal)+earned;S.bal=MOCK.balance;GBAL=S.bal;
+      r({ok:true,new_balance:MOCK.balance,earned});
+    }
+    else if(action==='do_prayer'){
+      const now=Math.floor(Date.now()/1000),last=MOCK.last_prayer||0,rem=Math.max(0,3600-(now-last));
+      if(rem>0) r({ok:false,error:'cooldown',remaining:rem});
+      else r({ok:true,count:(MOCK.prayer_count||0)+1});
     }
     else r({ok:true});
   },150));
